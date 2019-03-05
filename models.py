@@ -8,6 +8,8 @@ import layers
 import torch
 import torch.nn as nn
 
+from cnn import CNN
+
 class BiDAFTransformer(nn.module):
     """BiDAF transformer model with character-level embeddings for SQuAD
 

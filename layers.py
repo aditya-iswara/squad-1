@@ -19,7 +19,7 @@ class Embedding(nn.Module):
     (see `HighwayEncoder` class for details).
 
     Args:
-        word_vectors (torch.Tensor): Pre-trained word vectors.
+        word_vectors (torch.Tensor)i: Pre-trained word vectors.
         hidden_size (int): Size of hidden activations.
         drop_prob (float): Probability of zero-ing out activations
     """
@@ -37,6 +37,78 @@ class Embedding(nn.Module):
         emb = self.hwy(emb)   # (batch_size, seq_len, hidden_size)
 
         return emb
+
+class CharEmbedding(nn.Module):
+    """Embedding layer used by BiDAF including character embeddings.
+
+    Word-level embeddings are further refined using a 2-layer Highway Encoder
+    (see `HighwayEncoder` class for details).
+
+    Args:
+        word_vectors (torch.Tensor)i: Pre-trained word vectors.
+        hidden_size (int): Size of hidden activations.
+        drop_prob (float): Probability of zero-ing out activations
+    """
+    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob):
+        super(CharEmbedding, self).__init__()
+        self.drop_prob = drop_prob
+        self.word_embed = nn.Embedding.from_pretrained(word_vectors, freeze=True)
+        self.char_embed = nn.Embedding.from_pretrained(char_vectors, freeze=False)
+        self.CNN = nn.CNN()
+        self.proj = nn.Linear(word_vectors.size(1)+char_vectors.size(1), hidden_size, bias=False)
+        self.hwy = HighwayEncoder(2, hidden_size)
+
+    def forward(self, x):
+        word_emb = self.word_embed(x)   # (batch_size, seq_len, embed_size)
+        char_emb = self.char_embed(x)   # (batch_size, seq_len, embed_size)
+        emb = torch.cat((word_emb, char_emb), 1)
+        emb = F.dropout(emb, self.drop_prob, self.training)
+        emb = self.proj(emb)  # (batch_size, 2*seq_len, hidden_size)
+        emb = self.hwy(emb)   # (batch_size, 2*seq_len, hidden_size)
+
+        return emb
+
+    def __init__(self, embed_size, vocab):
+        """
+        Init the Embedding layer for one language
+        @param embed_size (int): Embedding size (dimensionality) for the output
+        @param vocab (VocabEntry): VocabEntry object. See vocab.py for documentation.
+        """
+        super(ModelEmbeddings, self).__init__()
+        self.embed_size = embed_size
+        self.embeddings = nn.Embedding(len(vocab.char2id), 50, vocab.word2id['<pad>'])
+        self.Cnn = CNN(char_embed_size=50, word_embed_size=embed_size)
+        self.Highway = Highway(word_embed_size=embed_size)
+        self.dropout = nn.Dropout(p=0.3)
+        ### END YOUR CODE
+
+    def forward(self, input):
+        """
+        Looks up character-based CNN embeddings for the words in a batch of sentences.
+        @param input: Tensor of integers of shape (sentence_length, batch_size, max_word_length) where
+            each integer is an index into the character vocabulary
+
+        @param output: Tensor of shape (sentence_length, batch_size, embed_size), containing the
+            CNN-based embeddings for each word of the sentences in the batch
+        """
+        ## A4 code
+        # output = self.embeddings(input)
+        # return output
+        ## End A4 code
+
+        ### YOUR CODE HERE for part 1j
+        output = []
+        input_emb = self.embeddings(input).permute(0,1,3,2)
+
+        for batch in torch.split(input_emb, 1, dim=0):
+            # input_reshaped = self.embeddings(batch).permute(0,1,3,2)
+            x_convout = self.Cnn(torch.squeeze(batch, dim=0))
+            x_highway = self.Highway(x_convout)
+
+            x_unshaped = self.dropout(x_highway)
+            output.append(x_unshaped)
+
+        return torch.stack(output)
 
 
 class HighwayEncoder(nn.Module):
@@ -182,6 +254,36 @@ class BiDAFAttention(nn.Module):
 
         return s
 
+class SelfAttention(nn.Module):
+    def __init__(self, hidden_size, drop_prob=0.1):
+        super(SelfAttention, self).__init__()
+        self.drop_prob = drop_prob
+        self.c_weight = nn.Parameter(torch.zeros(hidden_size, 1))
+        self.q_weight = nn.Parameter(torch.zeros(hidden_size, 1))
+        self.cq_weight = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        for weight in (self.c_weight, self.q_weight, self.cq_weight):
+            nn.init.xavier_uniform_(weight)
+        self.bias = nn.Parameter(torch.zeros(1))
+
+        self.birnn = nn.RNN()
+
+    def forward(self, c, q, c_mask, q_mask):
+        batch_size, c_len, _ = c.size()
+        q_len = q.size(1)
+        s = self.get_similarity_matrix(c, q)        # (batch_size, c_len, q_len)
+        c_mask = c_mask.view(batch_size, c_len, 1)  # (batch_size, c_len, 1)
+        q_mask = q_mask.view(batch_size, 1, q_len)  # (batch_size, 1, q_len)
+        s1 = masked_softmax(s, q_mask, dim=2)       # (batch_size, c_len, q_len)
+        s2 = masked_softmax(s, c_mask, dim=1)       # (batch_size, c_len, q_len)
+
+        # (bs, c_len, q_len) x (bs, q_len, hid_size) => (bs, c_len, hid_size)
+        a = torch.bmm(s1, q)
+        # (bs, c_len, c_len) x (bs, c_len, hid_size) => (bs, c_len, hid_size)
+        b = torch.bmm(torch.bmm(s1, s2.transpose(1, 2)), c)
+
+        x = torch.cat([c, a, c * a, c * b], dim=2)  # (bs, c_len, 4 * hid_size)
+
+        return x
 
 class BiDAFOutput(nn.Module):
     """Output layer used by BiDAF for question answering.

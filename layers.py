@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from util import masked_softmax
+from cnn import CNN
 
 
 class Embedding(nn.Module):
@@ -54,7 +55,7 @@ class CharEmbedding(nn.Module):
         self.drop_prob = drop_prob
         self.word_embed = nn.Embedding.from_pretrained(word_vectors, freeze=True)
         self.char_embed = nn.Embedding.from_pretrained(char_vectors, freeze=False)
-        self.CNN = nn.CNN(len(char_vectors[0]), 5)
+        self.CNN = CNN(len(char_vectors[0]), 5)
         self.proj = nn.Linear(word_vectors.size(1)+5, hidden_size, bias=False)
         self.hwy = HighwayEncoder(2, hidden_size)
 

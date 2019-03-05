@@ -10,7 +10,7 @@ import torch.nn as nn
 
 from cnn import CNN
 
-class BiDAFTransformer(nn.module):
+class BiDAFTransformer(nn.Module):
     """BiDAF transformer model with character-level embeddings for SQuAD
 
     Structure:
@@ -28,7 +28,7 @@ class BiDAFTransformer(nn.module):
         drop_prob (float): Dropout probability.
     """
     def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob=0.):
-        super(BiDAF, self).__init__()
+        super(BiDAFTransformer, self).__init__()
         self.emb = layers.CharEmbedding(word_vectors=word_vectors,
                                     char_vectors=char_vectors,
                                     hidden_size=hidden_size,

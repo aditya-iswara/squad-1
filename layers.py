@@ -62,9 +62,9 @@ class CharEmbedding(nn.Module):
         self.hwy = HighwayEncoder(2, hidden_size)
 
     def forward(self, x_char):
-        print("x_char shape:", x_char.shape)
+        # print("x_char shape:", x_char.shape)
         emb = self.embed(x_char).permute(0,1,3,2)
-        print("Embed Shape:", emb.shape)
+        # print("Embed Shape:", emb.shape)
 
         # emb = self.CNN(emb)
         # emb = F.dropout(emb, self.drop_prob, self.training)
@@ -76,9 +76,9 @@ class CharEmbedding(nn.Module):
 
         output = []
         for batch in torch.split(emb, 1, dim=0):
-            print(torch.squeeze(batch, dim=0).shape)
+            # print(torch.squeeze(batch, dim=0).shape)
             x_convout = self.CNN(torch.squeeze(batch, dim=0))
-            print(x_convout.shape)
+            # print(x_convout.shape)
             x_convout = F.dropout(x_convout, self.drop_prob, self.training)
             # print(x_convout.shape)
             x_proj = self.proj(x_convout)

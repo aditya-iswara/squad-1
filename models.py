@@ -58,17 +58,23 @@ class BiDAFTransformer(nn.Module):
                                       drop_prob=drop_prob)
 
     def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
-        cw_mask = torch.unsqueeze(torch.zeros_like(cw_idxs) != cw_idxs, 2)
-        cc_mask = torch.zeros_like(cc_idxs) != cc_idxs
-        print(cw_mask.shape)
-        print(cc_mask.shape)
-        c_mask = torch.cat((cw_mask, cc_mask), 2)
-        qw_mask = torch.unsqueeze(torch.zeros_like(qw_idxs) != qw_idxs, 2)
-        qc_mask = torch.zeros_like(qc_idxs) != qc_idxs
-        q_mask = torch.cat((qw_mask, qc_mask), 2)
-        c_len, q_len = c_mask.sum(-1).sum(-1), q_mask.sum(-1).sum(-1)
+        # cw_mask = torch.zeros_like(cw_idxs) != cw_idxs
+        # cc_mask = torch.zeros_like(cc_idxs) != cc_idxs
+        # print(cw_mask.shape)
+        # print(cc_mask.shape)
+        # c_mask = torch.cat((cw_mask, cc_mask), 2)
+        # qw_mask = torch.unsqueeze(torch.zeros_like(qw_idxs) != qw_idxs, 2)
+        # qc_mask = torch.zeros_like(qc_idxs) != qc_idxs
+        # q_mask = torch.cat((qw_mask, qc_mask), 2)
+        # c_len, q_len = c_mask.sum(-1).sum(-1), q_mask.sum(-1).sum(-1)
 
-        print(c_len.shape)
+        c_mask = torch.zeros_like(cw_idxs) != cw_idxs
+        c_mask = torch.cat((c_mask, torch.ones_like(c_mask)), 1)
+        # cc_mask = torch.zeros_like(cc_idxs) != cc_idxs
+        q_mask = torch.zeros_like(qw_idxs) != qw_idxs
+        q_mask = torch.cat((q_mask, torch.ones_like(q_mask)), 1)
+        # qc_mask = torch.zeros_like(qc_idxs) != qc_idxs
+        c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
 
         c_wordemb = self.wordemb(cw_idxs)
         c_charemb = self.charemb(cc_idxs)
@@ -77,8 +83,6 @@ class BiDAFTransformer(nn.Module):
 
         c_emb = torch.cat((c_wordemb, c_charemb), 1)        # (batch_size, c_len, hidden_size)
         q_emb = torch.cat((q_wordemb, q_charemb), 1)        # (batch_size, q_len, hidden_size)
-
-        print(c_emb.shape)
 
         c_enc = self.enc(c_emb, c_len)    # (batch_size, c_len, 2 * hidden_size)
         q_enc = self.enc(q_emb, q_len)    # (batch_size, q_len, 2 * hidden_size)

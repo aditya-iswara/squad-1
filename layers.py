@@ -28,6 +28,7 @@ class Embedding(nn.Module):
         super(Embedding, self).__init__()
         self.drop_prob = drop_prob
         self.embed = nn.Embedding.from_pretrained(word_vectors)
+        # print("Word vectors:", word_vectors.size())
         self.proj = nn.Linear(word_vectors.size(1), hidden_size, bias=False)
         self.hwy = HighwayEncoder(2, hidden_size)
 
@@ -46,29 +47,53 @@ class CharEmbedding(nn.Module):
     (see `HighwayEncoder` class for details).
 
     Args:
-        word_vectors (torch.Tensor)i: Pre-trained word vectors.
+        word_vectors (torch.Tensor)i: Pre-trained wo rd vectors.
         hidden_size (int): Size of hidden activations.
         drop_prob (float): Probability of zero-ing out activations
     """
-    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob):
+    # def __init__(self, char_vectors, hidden_size, drop_prob, char_embed_size, word_embed_size):
+    def __init__(self, char_vectors, hidden_size, drop_prob, char_embed_size=64, word_embed_size=300):
         super(CharEmbedding, self).__init__()
         self.drop_prob = drop_prob
-        self.word_embed = nn.Embedding.from_pretrained(word_vectors, freeze=True)
-        self.char_embed = nn.Embedding.from_pretrained(char_vectors, freeze=False)
-        self.CNN = CNN(len(char_vectors[0]), 5)
-        self.proj = nn.Linear(word_vectors.size(1)+5, hidden_size, bias=False)
+        # print("Char vectors:", char_vectors.shape)
+        self.embed = nn.Embedding.from_pretrained(char_vectors, freeze=False)
+        self.CNN = CNN(char_embed_size=char_embed_size, word_embed_size=word_embed_size)
+        self.proj = nn.Linear(word_embed_size, hidden_size, bias=False)
         self.hwy = HighwayEncoder(2, hidden_size)
 
-    def forward(self, x):
-        word_emb = self.word_embed(x)   # (batch_size, seq_len, embed_size)
-        char_emb = self.char_embed(x)   # (batch_size, seq_len, embed_size)
-        emb = self.CNN(char_emb)
-        emb = torch.cat((word_emb, emb), 1)
-        emb = F.dropout(emb, self.drop_prob, self.training)
-        emb = self.proj(emb)  # (batch_size, 2*seq_len, hidden_size)
-        emb = self.hwy(emb)   # (batch_size, 2*seq_len, hidden_size)
+    def forward(self, x_char):
+        print("x_char shape:", x_char.shape)
+        emb = self.embed(x_char).permute(0,1,3,2)
+        print("Embed Shape:", emb.shape)
 
-        return emb
+        # emb = self.CNN(emb)
+        # emb = F.dropout(emb, self.drop_prob, self.training)
+        # emb = self.proj(emb)
+        # emb = self.hwy(emb)
+        # print("Char_Embedding Shape:", emb.shape)
+        #
+        # return emb
+
+        output = []
+        for batch in torch.split(emb, 1, dim=0):
+            print(torch.squeeze(batch, dim=0).shape)
+            x_convout = self.CNN(torch.squeeze(batch, dim=0))
+            print(x_convout.shape)
+            x_convout = F.dropout(x_convout, self.drop_prob, self.training)
+            # print(x_convout.shape)
+            x_proj = self.proj(x_convout)
+            x_unshaped = self.hwy(x_proj)
+            output.append(x_unshaped)
+        return torch.stack(output)
+
+        # char_emb = self.char_embed(x_char)   # (batch_size, seq_len, embed_size)
+        # emb = self.CNN(char_emb)
+        # emb = torch.cat((word_emb, emb), 1)
+        # emb = F.dropout(emb, self.drop_prob, self.training)
+        # emb = self.proj(emb)  # (batch_size, seq_len, hidden_size)
+        # emb = self.hwy(emb)   # (batch_size, seq_len, hidden_size)
+
+        # return emb
     #
     # def __init__(self, embed_size, vocab):
     #     """

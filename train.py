@@ -108,8 +108,11 @@ def main(args):
                 batch_size = cw_idxs.size(0)
                 optimizer.zero_grad()
 
+                cc_idxs = cc_idxs.to(device)
+                qc_idxs = qc_idxs.to(device)
+
                 # Forward
-                log_p1, log_p2 = model(cw_idxs, qw_idxs)
+                log_p1, log_p2 = model(cw_idxs, qw_idxs, cc_idxs, qc_idxs)
                 y1, y2 = y1.to(device), y2.to(device)
                 loss = F.nll_loss(log_p1, y1) + F.nll_loss(log_p2, y2)
                 loss_val = loss.item()

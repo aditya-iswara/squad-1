@@ -7,6 +7,7 @@ Author:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Variable
 
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from util import masked_softmax
@@ -286,35 +287,74 @@ class BiDAFAttention(nn.Module):
         return s
 
 class SelfAttention(nn.Module):
-    def __init__(self, hidden_size, drop_prob=0.1):
+    def __init__(self, input_size, hidden_size, drop_prob=0.1):
         super(SelfAttention, self).__init__()
-        self.drop_prob = drop_prob
-        self.c_weight = nn.Parameter(torch.zeros(hidden_size, 1))
-        self.q_weight = nn.Parameter(torch.zeros(hidden_size, 1))
-        self.cq_weight = nn.Parameter(torch.zeros(1, 1, hidden_size))
-        for weight in (self.c_weight, self.q_weight, self.cq_weight):
-            nn.init.xavier_uniform_(weight)
-        self.bias = nn.Parameter(torch.zeros(1))
 
-        self.birnn = nn.RNN()
+        self.BiRNN = nn.GRU(input_size=input_size, hidden_size=hidden_size, dropout=drop_prob, bidirectional=True)
+        self.linear1 = nn.Linear(input_size, input_size)
+        self.linear2 = nn.Linear(input_size, input_size)
 
-    def forward(self, c, q, c_mask, q_mask):
-        batch_size, c_len, _ = c.size()
-        q_len = q.size(1)
-        s = self.get_similarity_matrix(c, q)        # (batch_size, c_len, q_len)
-        c_mask = c_mask.view(batch_size, c_len, 1)  # (batch_size, c_len, 1)
-        q_mask = q_mask.view(batch_size, 1, q_len)  # (batch_size, 1, q_len)
-        s1 = masked_softmax(s, q_mask, dim=2)       # (batch_size, c_len, q_len)
-        s2 = masked_softmax(s, c_mask, dim=1)       # (batch_size, c_len, q_len)
+        # self.c_weight = nn.Parameter(torch.zeros(hidden_size, 1))
+        # self.q_weight = nn.Parameter(torch.zeros(hidden_size, 1))
+        # self.cq_weight = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        # for weight in (self.c_weight, self.q_weight, self.cq_weight):
+        #     nn.init.xavier_uniform_(weight)
+        # self.bias = nn.Parameter(torch.zeros(1))
 
-        # (bs, c_len, q_len) x (bs, q_len, hid_size) => (bs, c_len, hid_size)
-        a = torch.bmm(s1, q)
-        # (bs, c_len, c_len) x (bs, c_len, hid_size) => (bs, c_len, hid_size)
-        b = torch.bmm(torch.bmm(s1, s2.transpose(1, 2)), c)
+    def forward(self, v):
+        c = []
+        for t in range(len(v)):
+            s = []
+            for j in range(len(v)):
+                s[j] = torch.mm(torch.transpose(v), F.tanh(self.linear1(v[j]) + self.linear2(v[t])))
+            a = F.softmax(torch.Tensor(s))
+            c[t] = torch.sum(a * v, 1)
+        c_ten = torch.Tensor(c)
+        return self.BiRNN(torch.cat(v, c_ten, 1))
 
-        x = torch.cat([c, a, c * a, c * b], dim=2)  # (bs, c_len, 4 * hid_size)
+        # batch_size, c_len, _ = c.size()
+        # q_len = q.size(1)
+        # s = self.get_similarity_matrix(c, q)        # (batch_size, c_len, q_len)
+        # c_mask = c_mask.view(batch_size, c_len, 1)  # (batch_size, c_len, 1)
+        # q_mask = q_mask.view(batch_size, 1, q_len)  # (batch_size, 1, q_len)
+        # s1 = masked_softmax(s, q_mask, dim=2)       # (batch_size, c_len, q_len)
+        # s2 = masked_softmax(s, c_mask, dim=1)       # (batch_size, c_len, q_len)
+        #
+        # # (bs, c_len, q_len) x (bs, q_len, hid_size) => (bs, c_len, hid_size)
+        # a = torch.bmm(s1, q)
+        # # (bs, c_len, c_len) x (bs, c_len, hid_size) => (bs, c_len, hid_size)
+        # b = torch.bmm(torch.bmm(s1, s2.transpose(1, 2)), c)
+        #
+        # x = torch.cat([c, a, c * a, c * b], dim=2)  # (bs, c_len, 4 * hid_size)
+        #
+        # return x
 
-        return x
+class GatedAttention(nn.Module):
+    def __init__(self, enc_size, drop_prob=0.1):
+        super(GatedAttention, self).__init__()
+        self.uq = nn.Linear(enc_size, enc_size)
+        self.uc = nn.Linear(enc_size, enc_size)
+        self.vq = nn.Linear(enc_size, enc_size)
+        self.softmax = nn.Softmax()
+        self.prevHiddenState = Variable(torch.zeros(2,self.batch_size,self.hidden_size))
+        self.rnn = nn.GRU(enc_size, enc_size)
+
+    def forward(self, c, q):
+        hidden_states = []
+        self.prevHiddenState = Variable(torch.zeros(1,self.batch_size,self.hidden_size))
+        # hidden_states.append(self.prevHiddenState)
+        for i in range(len(c)):
+            hidden_mult = self.vq(self.prevHiddenState).unsqueeze(0)
+            context_mult = self.uc(c[i]).unsqueeze(0)
+            question_mult = self.uq(q.unsqueeze(1))
+            pre_softmax = self.prevHiddenState.matmul(F.tanh(hidden_mult + context_mult + question_mult))
+            attention_vec = self.softmax(pre_softmax)
+            cell_state = q.matmul(attention_vec)
+
+            output = self.rnn(cell_state, self.prevHiddenState)
+            hidden_states.append(output)
+            self.prevHiddenState = output
+        return torch.Tensor(hidden_states)
 
 class BiDAFOutput(nn.Module):
     """Output layer used by BiDAF for question answering.

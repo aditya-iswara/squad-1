@@ -330,18 +330,20 @@ class SelfAttention(nn.Module):
         # return x
 
 class GatedAttention(nn.Module):
-    def __init__(self, enc_size, drop_prob=0.1):
+    def __init__(self, enc_size):
         super(GatedAttention, self).__init__()
+        self.enc_size = enc_size
         self.uq = nn.Linear(enc_size, enc_size)
         self.uc = nn.Linear(enc_size, enc_size)
         self.vq = nn.Linear(enc_size, enc_size)
         self.softmax = nn.Softmax()
-        self.prevHiddenState = Variable(torch.zeros(2,self.batch_size,self.hidden_size))
-        self.rnn = nn.GRU(enc_size, enc_size)
+        self.gatedAttention = nn.Linear(2*enc_size, 2*enc_size)
+        self.prevHiddenState = Variable(torch.zeros(self.enc_size,))
+        self.rnn = nn.GRU(2*enc_size, enc_size, num_layers=1, batch_first=True, bidirectional=True)
 
     def forward(self, c, q):
         hidden_states = []
-        self.prevHiddenState = Variable(torch.zeros(1,self.batch_size,self.hidden_size))
+        self.prevHiddenState = Variable(torch.zeros(self.enc_size,))
         # hidden_states.append(self.prevHiddenState)
         for i in range(len(c)):
             hidden_mult = self.vq(self.prevHiddenState).unsqueeze(0)
@@ -351,10 +353,16 @@ class GatedAttention(nn.Module):
             attention_vec = self.softmax(pre_softmax)
             cell_state = q.matmul(attention_vec)
 
-            output = self.rnn(cell_state, self.prevHiddenState)
-            hidden_states.append(output)
-            self.prevHiddenState = output
-        return torch.Tensor(hidden_states)
+            preGateInput = torch.cat((c[i], cell_state), dim=1)
+
+            gate = F.sigmoid(self.gatedAttention(preGateInput))
+            gate_input = (preGateInput*gate).unsqueeze(1)
+
+            output, self.prevHiddenState = self.rnn(gate_input, self.prevHiddenState)
+            hidden_states.append(self.prevHiddenState)
+            h = self.prevHiddenState
+            h = torch.cat((h[0,:,:],h[1,:,:]),dim=1)
+        return torch.stack(hidden_states)
 
 class BiDAFOutput(nn.Module):
     """Output layer used by BiDAF for question answering.

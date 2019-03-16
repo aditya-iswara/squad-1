@@ -27,39 +27,43 @@ class BiDAFTransformer(nn.Module):
         hidden_size (int): Number of features in the hidden state at each layer.
         drop_prob (float): Dropout probability.
     """
-    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob=0.):
+    def __init__(self, word_vectors, char_vectors, hidden_size=100, drop_prob=0.1):
         super(BiDAFTransformer, self).__init__()
         self.wordemb = layers.Embedding(word_vectors=word_vectors,
-                                        hidden_size=hidden_size,
+                                        hidden_size=word_vectors.shape[1],
                                         drop_prob=drop_prob)
 
         self.charemb = layers.CharEmbedding(char_vectors=char_vectors,
-                                    hidden_size=hidden_size,
+                                    hidden_size=word_vectors.shape[1],
                                     drop_prob=drop_prob)
 
-        self.emb = nn.GRU(input_size=hidden_size*2, hidden_size=hidden_size*2) # bidirectional=true
+        input_size = word_vectors.shape[1]*2
 
-        self.enc = layers.RNNEncoder(input_size=hidden_size,
-                                     hidden_size=hidden_size,
-                                     num_layers=1,
-                                     drop_prob=drop_prob)
+        self.emb = nn.GRU(input_size=input_size, hidden_size=hidden_size, batch_first=True, bidirectional=True) # bidirectional=True
 
-        self.att = layers.BiDAFAttention(hidden_size=2 * hidden_size,
-                                         drop_prob=drop_prob)
+        # self.enc = layers.RNNEncoder(input_size=hidden_size,
+        #                              hidden_size=hidden_size,
+        #                              num_layers=1,
+        #                              drop_prob=drop_prob)
+        #
+        # self.att = layers.BiDAFAttention(hidden_size=2 * hidden_size,
+        #                                  drop_prob=drop_prob)
 
-        self.gatedatt = layers.GatedAttention()
+        self.gatedatt = layers.GatedAttention(enc_size=2*hidden_size)
 
-        self.selfatt = layers.SelfAttention(input_size=8 * hidden_size,
-                                             hidden_size=hidden_size,
-                                             drop_prob=drop_prob)
 
-        self.mod = layers.RNNEncoder(input_size=8 * hidden_size,
-                                     hidden_size=hidden_size,
-                                     num_layers=2,
-                                     drop_prob=drop_prob)
 
-        self.out = layers.BiDAFOutput(hidden_size=hidden_size,
-                                      drop_prob=drop_prob)
+        self.selfatt = layers.SelfAttention(input_size=4*hidden_size,
+                                             hidden_size=hidden_size, drop_prob=drop_prob)
+
+        # self.mod = layers.RNNEncoder(input_size=8 * hidden_size,
+        #                              hidden_size=hidden_size,
+        #                              num_layers=2,
+        #                              drop_prob=drop_prob)
+        #
+        # self.out = layers.BiDAFOutput(hidden_size=hidden_size,
+        #                               drop_prob=drop_prob)
+        self.output = layers.RNETOutput(hidden_size=2*hidden_size)
 
     def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
         # cw_mask = torch.zeros_like(cw_idxs) != cw_idxs
@@ -85,23 +89,37 @@ class BiDAFTransformer(nn.Module):
         q_wordemb = self.wordemb(qw_idxs)
         q_charemb = self.charemb(qc_idxs)
 
-        c_emb = torch.cat((c_wordemb, c_charemb), 1)        # (batch_size, c_len, hidden_size)
-        q_emb = torch.cat((q_wordemb, q_charemb), 1)        # (batch_size, q_len, hidden_size)
+        # print("c_wordemb:", c_wordemb.shape)
 
-        c_emb = self.emb(c_emb)
-        q_emb = self.emb(q_emb)
+        c_emb = torch.cat((c_wordemb, c_charemb), 2)
+        q_emb = torch.cat((q_wordemb, q_charemb), 2)
 
-        c_enc = self.enc(c_emb, c_len)    # (batch_size, c_len, 2 * hidden_size)
-        q_enc = self.enc(q_emb, q_len)    # (batch_size, q_len, 2 * hidden_size)
+        # print("c_emb:", c_emb.shape)
+        # print("q_emb:", q_emb.shape)
 
-        att = self.att(c_enc, q_enc,
-                       c_mask, q_mask)    # (batch_size, c_len, 8 * hidden_size)
+        c_emb, _ = self.emb(c_emb)
+        q_emb, _ = self.emb(q_emb)
 
-        #selfatt = self.selfatt(att, )
+        print("c_emb:", c_emb.shape)
+        print("q_emb:", q_emb.shape)
 
-        mod = self.mod(att, c_len)        # (batch_size, c_len, 2 * hidden_size)
+        v = self.gatedatt(c_emb, q_emb)
 
-        out = self.out(att, mod, c_mask)  # 2 tensors, each (batch_size, c_len)
+        h = self.selfatt(v)
+
+        out = self.output(q, h)
+
+        # c_enc = self.enc(c_emb, c_len)    # (batch_size, c_len, 2 * hidden_size)
+        # q_enc = self.enc(q_emb, q_len)    # (batch_size, q_len, 2 * hidden_size)
+        #
+        # att = self.att(c_enc, q_enc,
+        #                c_mask, q_mask)    # (batch_size, c_len, 8 * hidden_size)
+        #
+        # #selfatt = self.selfatt(att, )
+        #
+        # mod = self.mod(att, c_len)        # (batch_size, c_len, 2 * hidden_size)
+        #
+        # out = self.out(att, mod, c_mask)  # 2 tensors, each (batch_size, c_len)
 
         return out
 

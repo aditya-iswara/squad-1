@@ -303,66 +303,38 @@ class SelfAttention(nn.Module):
     """
     def __init__(self, input_size, hidden_size, drop_prob):
         super(SelfAttention, self).__init__()
-
-        self.BiRNN = nn.GRU(input_size=input_size, hidden_size=hidden_size, dropout=drop_prob, bidirectional=True)
+        self.hidden_size = hidden_size
+        self.BiRNN = nn.GRU(input_size=4*hidden_size, hidden_size=hidden_size, batch_first=True, dropout=drop_prob, bidirectional=True)
         self.linear1 = nn.Linear(input_size, input_size)
         self.linear2 = nn.Linear(input_size, input_size)
+        self.softmax = nn.Softmax(dim=2)
+        self.gatedAttention = nn.Linear(4*hidden_size, 4*hidden_size)
 
-        # self.c_weight = nn.Parameter(torch.zeros(hidden_size, 1))
-        # self.q_weight = nn.Parameter(torch.zeros(hidden_size, 1))
-        # self.cq_weight = nn.Parameter(torch.zeros(1, 1, hidden_size))
-        # for weight in (self.c_weight, self.q_weight, self.cq_weight):
-        #     nn.init.xavier_uniform_(weight)
-        # self.bias = nn.Parameter(torch.zeros(1))
 
     def forward(self, v):
-        # c = []
-        # for t in range(len(v)):
-        #     s = []
-        #     for j in range(len(v)):
-        #         s[j] = torch.mm(torch.transpose(v), F.tanh(self.linear1(v[j]) + self.linear2(v[t])))
-        #     a = F.softmax(torch.Tensor(s))
-        #     c[t] = torch.sum(a * v, 1)
-        # c_ten = torch.Tensor(c)
-        # return self.BiRNN(torch.cat(v, c_ten, 1))
-
         hidden_states = []
-        self.prevHiddenState = Variable(torch.zeros(self.enc_size, ))
-        # hidden_states.append(self.prevHiddenState)
-        for i in range(len(v)):
-            hidden_mult = self.linear1(self.prevHiddenState).unsqueeze(0)
-            context_mult = self.linear2(v[i]).unsqueeze(0)
-            pre_softmax = self.prevHiddenState.matmul(F.tanh(hidden_mult + context_mult))
+        self.prevHiddenState = Variable(torch.zeros(2, v.shape[0], self.hidden_size))        # hidden_states.append(self.prevHiddenState)
+
+        v_perm = v.permute(1,0,2)
+        for context_word in torch.split(v_perm, 1):
+            currentword_mult = self.linear1(context_word)
+            context_mult = self.linear2(v_perm)
+            f = torch.tanh(currentword_mult + context_mult)
+            f = f.permute(1,2,0) # 64, 200, 357
+            pre_softmax = (context_word.permute(1,0,2)).matmul(f) #64, 1, 357
             attention_vec = self.softmax(pre_softmax)
-            cell_state = v.matmul(attention_vec)
+            cell_state = attention_vec.matmul(v)
 
-            preGateInput = torch.cat((v[i], cell_state), dim=1)
+            preGateInput = torch.cat((context_word.permute(1,0,2), cell_state), dim=2)
 
-            gate = F.sigmoid(self.gatedAttention(preGateInput))
-            gate_input = (preGateInput * gate).unsqueeze(1)
+            gate = torch.sigmoid(self.gatedAttention(preGateInput))
+            gate_input = (preGateInput * gate) #64, 1, 400
 
             output, self.prevHiddenState = self.BiRNN(gate_input, self.prevHiddenState)
             h = self.prevHiddenState
             h = torch.cat((h[0, :, :], h[1, :, :]), dim=1)
             hidden_states.append(h)
         return torch.stack(hidden_states)
-
-        # batch_size, c_len, _ = c.size()
-        # q_len = q.size(1)
-        # s = self.get_similarity_matrix(c, q)        # (batch_size, c_len, q_len)
-        # c_mask = c_mask.view(batch_size, c_len, 1)  # (batch_size, c_len, 1)
-        # q_mask = q_mask.view(batch_size, 1, q_len)  # (batch_size, 1, q_len)
-        # s1 = masked_softmax(s, q_mask, dim=2)       # (batch_size, c_len, q_len)
-        # s2 = masked_softmax(s, c_mask, dim=1)       # (batch_size, c_len, q_len)
-        #
-        # # (bs, c_len, q_len) x (bs, q_len, hid_size) => (bs, c_len, hid_size)
-        # a = torch.bmm(s1, q)
-        # # (bs, c_len, c_len) x (bs, c_len, hid_size) => (bs, c_len, hid_size)
-        # b = torch.bmm(torch.bmm(s1, s2.transpose(1, 2)), c)
-        #
-        # x = torch.cat([c, a, c * a, c * b], dim=2)  # (bs, c_len, 4 * hid_size)
-        #
-        # return x
 
 class GatedAttention(nn.Module):
     def __init__(self, enc_size):
@@ -371,68 +343,71 @@ class GatedAttention(nn.Module):
         self.uq = nn.Linear(enc_size, enc_size)
         self.uc = nn.Linear(enc_size, enc_size)
         self.vq = nn.Linear(enc_size, enc_size)
-        self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(dim=2)
         self.gatedAttention = nn.Linear(2*enc_size, 2*enc_size)
         self.prevHiddenState = Variable(torch.zeros(self.enc_size,))
-        self.rnn = nn.GRU(2*enc_size, enc_size, num_layers=1, batch_first=True, bidirectional=True)
+        self.rnn = nn.GRU(2*enc_size, enc_size, num_layers=1, batch_first=True)
 
     def forward(self, c, q):
         hidden_states = []
-        self.prevHiddenState = Variable(torch.zeros(self.enc_size,))
-        # hidden_states.append(self.prevHiddenState)
-        print("q.shape:", q.shape)
-        for i in range(len(c)):
-            hidden_mult = self.vq(self.prevHiddenState).unsqueeze(0)
-            context_mult = self.uc(c[i]).unsqueeze(0)
-            question_mult = self.uq(q[i].unsqueeze(1))
-            print(hidden_mult.shape, context_mult.shape, question_mult.shape)
-            f = F.tanh(hidden_mult + context_mult + question_mult)
-            print(self.prevHiddenState.shape)
-            print(f.shape)
-            pre_softmax = self.prevHiddenState.matmul(f)
+        self.prevHiddenState = Variable(torch.zeros(1, c.shape[0], self.enc_size))
+
+        c_perm = c.permute(1,0,2)
+        q_perm = q.permute(1,0,2)
+        for context_word in torch.split(c_perm, 1):
+            hidden_mult = self.vq(self.prevHiddenState)
+            context_mult = self.uc(context_word)
+            question_mult = self.uq(q_perm)
+            f = torch.tanh(hidden_mult + context_mult + question_mult)
+            # self.prevHiddenState = self.prevHiddenState.permute(1,0,2)
+            f = f.permute(1,2,0)
+            pre_softmax = (self.prevHiddenState.permute(1,0,2)).matmul(f)
             attention_vec = self.softmax(pre_softmax)
-            cell_state = q.matmul(attention_vec)
+            # print("attention_vec shape:", attention_vec.shape)
+            # cell_state = q.matmul(attention_vec)
+            cell_state = attention_vec.matmul(q)
 
-            preGateInput = torch.cat((c[i], cell_state), dim=1)
+            preGateInput = torch.cat((context_word.permute(1,0,2), cell_state), dim=2)
 
-            gate = F.sigmoid(self.gatedAttention(preGateInput))
-            gate_input = (preGateInput*gate).unsqueeze(1)
+            gate = torch.sigmoid(self.gatedAttention(preGateInput))
+            gate_input = (preGateInput*gate)
 
             output, self.prevHiddenState = self.rnn(gate_input, self.prevHiddenState)
-            h = self.prevHiddenState
-            h = torch.cat((h[0,:,:],h[1,:,:]),dim=1)
-            hidden_states.append(h)
-        return torch.stack(hidden_states)
+            # h = self.prevHiddenState
+            # h = torch.cat((h[0,:,:],h[1,:,:]),dim=1)
+            hidden_states.append(self.prevHiddenState.squeeze())
+        return torch.stack(hidden_states).permute(1,0,2)
 
 class RNETOutput(nn.Module):
     def __init__(self, hidden_size):
         super(RNETOutput, self).__init__()
-        self.initial_linear = nn.Linear(hidden_size*2,hidden_size)
-        self.h_linear = nn.Linear(hidden_size*2, hidden_size)
-        self.ha_linear = nn.Linear(hidden_size*2, hidden_size)
-        self.vt_linear = nn.Linear(hidden_size*2, hidden_size)
+        self.initial_linear = nn.Linear(hidden_size,hidden_size)
+        self.h_linear = nn.Linear(hidden_size, hidden_size)
+        self.ha_linear = nn.Linear(hidden_size, hidden_size)
+        self.vt_linear = nn.Linear(hidden_size, 1)
         self.rnn = nn.GRU(hidden_size, hidden_size, num_layers=1, batch_first=True)
 
 
 
     def forward(self, ques, h):
-        q = self.initial_linear(ques)
-        a_t = F.sigmoid(self.vt_linear(self.tanh(q)))
-        r_q = torch.sum(a_t*q,dim=1).unsqueeze(0)
+        q = self.initial_linear(ques) #64,23,200
+        a_t = F.softmax(self.vt_linear(torch.tanh(q)), dim=2)
+        # r_q = torch.sum(a_t*q,dim=1)
+        r_q = (q.permute(0,2,1)).matmul(a_t)
         self.hidden_ans = r_q
 
-        h_val = self.h_linear(h)
-        h_a = self.ha_linear(self.hidden_ans)
-        output = self.vt_linear(F.tanh(h_val + h_a))
-        p_1 = F.log_softmax(output.squeeze(2))
+        h_val = self.h_linear(h.permute(1,0,2))
+        h_a = self.ha_linear(self.hidden_ans.permute(0,2,1))
+        output = self.vt_linear(torch.tanh(h_val + h_a))
+        p_1 = F.log_softmax(output, dim=1)
 
-        c_t = output.matmul(h)
-        trash, self.hidden_ans = self.rnn(c_t, self.hidden_ans)
+        c_t = h.permute(1,2,0).matmul(output)
+        trash, self.hidden_ans = self.rnn(c_t.permute(0,2,1), self.hidden_ans.permute(2,0,1))
 
-        h_val = self.h_linear(h)
-        h_a = self.ha_linear(self.hidden_ans)
-        output = self.vt_linear(F.tanh(h_val + h_a))
-        p_2 = F.log_softmax(output.squeeze(2))
+        h_val = self.h_linear(h.permute(1,0,2))
+        h_a = self.ha_linear(self.hidden_ans.permute(1,0,2))
+        output = self.vt_linear(torch.tanh(h_val + h_a))
+        p_2 = F.log_softmax(output, dim=1)
 
         return p_1, p_2
 

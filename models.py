@@ -53,7 +53,7 @@ class BiDAFTransformer(nn.Module):
 
 
 
-        self.selfatt = layers.SelfAttention(input_size=4*hidden_size,
+        self.selfatt = layers.SelfAttention(input_size=2*hidden_size,
                                              hidden_size=hidden_size, drop_prob=drop_prob)
 
         # self.mod = layers.RNNEncoder(input_size=8 * hidden_size,
@@ -76,13 +76,13 @@ class BiDAFTransformer(nn.Module):
         # q_mask = torch.cat((qw_mask, qc_mask), 2)
         # c_len, q_len = c_mask.sum(-1).sum(-1), q_mask.sum(-1).sum(-1)
 
-        c_mask = torch.zeros_like(cw_idxs) != cw_idxs
-        c_mask = torch.cat((c_mask, torch.ones_like(c_mask)), 1)
-        # cc_mask = torch.zeros_like(cc_idxs) != cc_idxs
-        q_mask = torch.zeros_like(qw_idxs) != qw_idxs
-        q_mask = torch.cat((q_mask, torch.ones_like(q_mask)), 1)
-        # qc_mask = torch.zeros_like(qc_idxs) != qc_idxs
-        c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
+        # c_mask = torch.zeros_like(cw_idxs) != cw_idxs
+        # c_mask = torch.cat((c_mask, torch.ones_like(c_mask)), 1)
+        # # cc_mask = torch.zeros_like(cc_idxs) != cc_idxs
+        # q_mask = torch.zeros_like(qw_idxs) != qw_idxs
+        # q_mask = torch.cat((q_mask, torch.ones_like(q_mask)), 1)
+        # # qc_mask = torch.zeros_like(qc_idxs) != qc_idxs
+        # c_len, q_len = c_mask.sum(-1), q_mask.sum(-1)
 
         c_wordemb = self.wordemb(cw_idxs)
         c_charemb = self.charemb(cc_idxs)
@@ -100,14 +100,14 @@ class BiDAFTransformer(nn.Module):
         c_emb, _ = self.emb(c_emb)
         q_emb, _ = self.emb(q_emb)
 
-        print("c_emb:", c_emb.shape)
-        print("q_emb:", q_emb.shape)
+        # print("c_emb:", c_emb.shape)
+        # print("q_emb:", q_emb.shape)
 
         v = self.gatedatt(c_emb, q_emb)
 
         h = self.selfatt(v)
 
-        out = self.output(q, h)
+        out = self.output(q_emb, h)
 
         # c_enc = self.enc(c_emb, c_len)    # (batch_size, c_len, 2 * hidden_size)
         # q_enc = self.enc(q_emb, q_len)    # (batch_size, q_len, 2 * hidden_size)

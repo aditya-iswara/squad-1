@@ -314,7 +314,7 @@ class SelfAttention(nn.Module):
 
     def forward(self, v):
         hidden_states = []
-        self.prevHiddenState = Variable(torch.zeros((2, v.shape[0], self.hidden_size), device=self.device))        # hidden_states.append(self.prevHiddenState)
+        self.prevHiddenState = Variable(torch.zeros(2, v.shape[0], self.hidden_size).cuda())        # hidden_states.append(self.prevHiddenState)
 
         v_perm = v.permute(1,0,2)
         for context_word in torch.split(v_perm, 1):
@@ -346,13 +346,13 @@ class GatedAttention(nn.Module):
         self.vq = nn.Linear(enc_size, enc_size)
         self.softmax = nn.Softmax(dim=2)
         self.gatedAttention = nn.Linear(2*enc_size, 2*enc_size)
-        self.prevHiddenState = Variable(torch.zeros(self.enc_size,device=device))
+        self.prevHiddenState = Variable(torch.zeros(self.enc_size,).cuda())
         self.rnn = nn.GRU(2*enc_size, enc_size, num_layers=1, batch_first=True)
         self.device = device
 
     def forward(self, c, q):
         hidden_states = []
-        self.prevHiddenState = Variable(torch.zeros((1, c.shape[0], self.enc_size), device=self.device))
+        self.prevHiddenState = Variable(torch.zeros(1, c.shape[0], self.enc_size).cuda())
 
         c_perm = c.permute(1,0,2)
         q_perm = q.permute(1,0,2)

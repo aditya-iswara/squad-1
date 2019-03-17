@@ -66,15 +66,15 @@ class BiDAFTransformer(nn.Module):
         self.output = layers.RNETOutput(hidden_size=2*hidden_size, device=device)
 
     def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
-        # cw_mask = torch.zeros_like(cw_idxs) != cw_idxs
-        # cc_mask = torch.zeros_like(cc_idxs) != cc_idxs
+        cw_mask = torch.zeros_like(cw_idxs) != cw_idxs
+        cc_mask = torch.zeros_like(cc_idxs) != cc_idxs
         # print(cw_mask.shape)
         # print(cc_mask.shape)
-        # c_mask = torch.cat((cw_mask, cc_mask), 2)
-        # qw_mask = torch.unsqueeze(torch.zeros_like(qw_idxs) != qw_idxs, 2)
-        # qc_mask = torch.zeros_like(qc_idxs) != qc_idxs
-        # q_mask = torch.cat((qw_mask, qc_mask), 2)
-        # c_len, q_len = c_mask.sum(-1).sum(-1), q_mask.sum(-1).sum(-1)
+        c_mask = torch.cat((cw_mask, cc_mask), 2)
+        qw_mask = torch.unsqueeze(torch.zeros_like(qw_idxs) != qw_idxs, 2)
+        qc_mask = torch.zeros_like(qc_idxs) != qc_idxs
+        q_mask = torch.cat((qw_mask, qc_mask), 2)
+        #c_len, q_len = c_mask.sum(-1).sum(-1), q_mask.sum(-1).sum(-1)
 
         # c_mask = torch.zeros_like(cw_idxs) != cw_idxs
         # c_mask = torch.cat((c_mask, torch.ones_like(c_mask)), 1)
@@ -105,9 +105,9 @@ class BiDAFTransformer(nn.Module):
 
         v = self.gatedatt(c_emb, q_emb)
 
-        h = self.selfatt(v)
+        h = self.selfatt(v, c_mask)
 
-        out = self.output(q_emb, h)
+        out = self.output(q_emb, h, c_mask, q_mask)
 
         # c_enc = self.enc(c_emb, c_len)    # (batch_size, c_len, 2 * hidden_size)
         # q_enc = self.enc(q_emb, q_len)    # (batch_size, q_len, 2 * hidden_size)

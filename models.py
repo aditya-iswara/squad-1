@@ -27,7 +27,7 @@ class BiDAFTransformer(nn.Module):
         hidden_size (int): Number of features in the hidden state at each layer.
         drop_prob (float): Dropout probability.
     """
-    def __init__(self, word_vectors, char_vectors, hidden_size=100, drop_prob=0.1):
+    def __init__(self, word_vectors, char_vectors, hidden_size=100, drop_prob=0.1, device=None):
         super(BiDAFTransformer, self).__init__()
         self.wordemb = layers.Embedding(word_vectors=word_vectors,
                                         hidden_size=word_vectors.shape[1],
@@ -49,12 +49,12 @@ class BiDAFTransformer(nn.Module):
         # self.att = layers.BiDAFAttention(hidden_size=2 * hidden_size,
         #                                  drop_prob=drop_prob)
 
-        self.gatedatt = layers.GatedAttention(enc_size=2*hidden_size)
+        self.gatedatt = layers.GatedAttention(enc_size=2*hidden_size, device=device)
 
 
 
         self.selfatt = layers.SelfAttention(input_size=2*hidden_size,
-                                             hidden_size=hidden_size, drop_prob=drop_prob)
+                                             hidden_size=hidden_size, drop_prob=drop_prob, device=device)
 
         # self.mod = layers.RNNEncoder(input_size=8 * hidden_size,
         #                              hidden_size=hidden_size,
@@ -63,7 +63,7 @@ class BiDAFTransformer(nn.Module):
         #
         # self.out = layers.BiDAFOutput(hidden_size=hidden_size,
         #                               drop_prob=drop_prob)
-        self.output = layers.RNETOutput(hidden_size=2*hidden_size)
+        self.output = layers.RNETOutput(hidden_size=2*hidden_size, device=device)
 
     def forward(self, cw_idxs, qw_idxs, cc_idxs, qc_idxs):
         # cw_mask = torch.zeros_like(cw_idxs) != cw_idxs

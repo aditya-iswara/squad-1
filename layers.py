@@ -301,7 +301,7 @@ class SelfAttention(nn.Module):
         hidden_size (int): Size of hidden activations.
         drop_prob (float): Probability of zero-ing out activations.
     """
-    def __init__(self, input_size, hidden_size, drop_prob):
+    def __init__(self, input_size, hidden_size, drop_prob, device=None):
         super(SelfAttention, self).__init__()
         self.hidden_size = hidden_size
         self.BiRNN = nn.GRU(input_size=4*hidden_size, hidden_size=hidden_size, batch_first=True, dropout=drop_prob, bidirectional=True)
@@ -309,11 +309,12 @@ class SelfAttention(nn.Module):
         self.linear2 = nn.Linear(input_size, input_size)
         self.softmax = nn.Softmax(dim=2)
         self.gatedAttention = nn.Linear(4*hidden_size, 4*hidden_size)
+        self.device = device
 
 
     def forward(self, v):
         hidden_states = []
-        self.prevHiddenState = Variable(torch.zeros(2, v.shape[0], self.hidden_size))        # hidden_states.append(self.prevHiddenState)
+        self.prevHiddenState = Variable(torch.zeros((2, v.shape[0], self.hidden_size), device=self.device))        # hidden_states.append(self.prevHiddenState)
 
         v_perm = v.permute(1,0,2)
         for context_word in torch.split(v_perm, 1):
@@ -337,7 +338,7 @@ class SelfAttention(nn.Module):
         return torch.stack(hidden_states)
 
 class GatedAttention(nn.Module):
-    def __init__(self, enc_size):
+    def __init__(self, enc_size, device=None):
         super(GatedAttention, self).__init__()
         self.enc_size = enc_size
         self.uq = nn.Linear(enc_size, enc_size)
@@ -345,12 +346,13 @@ class GatedAttention(nn.Module):
         self.vq = nn.Linear(enc_size, enc_size)
         self.softmax = nn.Softmax(dim=2)
         self.gatedAttention = nn.Linear(2*enc_size, 2*enc_size)
-        self.prevHiddenState = Variable(torch.zeros(self.enc_size,))
+        self.prevHiddenState = Variable(torch.zeros(self.enc_size,device=device))
         self.rnn = nn.GRU(2*enc_size, enc_size, num_layers=1, batch_first=True)
+        self.device = device
 
     def forward(self, c, q):
         hidden_states = []
-        self.prevHiddenState = Variable(torch.zeros(1, c.shape[0], self.enc_size))
+        self.prevHiddenState = Variable(torch.zeros((1, c.shape[0], self.enc_size), device=self.device))
 
         c_perm = c.permute(1,0,2)
         q_perm = q.permute(1,0,2)
@@ -379,14 +381,14 @@ class GatedAttention(nn.Module):
         return torch.stack(hidden_states).permute(1,0,2)
 
 class RNETOutput(nn.Module):
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_size, device=None):
         super(RNETOutput, self).__init__()
         self.initial_linear = nn.Linear(hidden_size,hidden_size)
         self.h_linear = nn.Linear(hidden_size, hidden_size)
         self.ha_linear = nn.Linear(hidden_size, hidden_size)
         self.vt_linear = nn.Linear(hidden_size, 1)
         self.rnn = nn.GRU(hidden_size, hidden_size, num_layers=1, batch_first=True)
-
+        self.device = device
 
 
     def forward(self, ques, h):

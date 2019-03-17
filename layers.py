@@ -304,10 +304,10 @@ class SelfAttention(nn.Module):
     def __init__(self, input_size, hidden_size, drop_prob, device=None):
         super(SelfAttention, self).__init__()
         self.hidden_size = hidden_size
-        self.BiRNN = nn.GRU(input_size=4*hidden_size, hidden_size=hidden_size, batch_first=True, bidirectional=True)
+        self.BiRNN = nn.GRU(input_size=4*hidden_size, hidden_size=hidden_size, batch_first=True, dropout=drop_prob, bidirectional=True)
         self.linear1 = nn.Linear(input_size, input_size)
         self.linear2 = nn.Linear(input_size, input_size)
-        self.softmax = nn.Softmax(dim=2)
+        self.softmax = nn.Softmax(dim=3)
         self.gatedAttention = nn.Linear(4*hidden_size, 4*hidden_size)
         # self.device = device
         if device:
@@ -315,26 +315,29 @@ class SelfAttention(nn.Module):
         else:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    def forward(self, v, c_mask):
+    def forward(self, v):
+        self.prevHiddenState = Variable(torch.zeros(2, v.shape[0], self.hidden_size))        # .cuda()
+
+        v_perm = v.permute(1,0,2) # 357, 64, 200
+        # for context_word in torch.split(v_perm, 1):
+
+        context_words = v_perm.unsqueeze(1) #357, 1, 64, 200
+        currentword_mult = self.linear1(context_words) # 357, 1, 64, 200
+        context_mult = self.linear2(v_perm) # 357, 64, 200
+        f = torch.tanh(currentword_mult + context_mult) # 357, 357, 64, 200
+        f = f.permute(0,2,3,1) # 357, 64, 200, 357
+        pre_softmax = (context_words.permute(0,2,1,3)).matmul(f) #(357,64, 1, 200)(357,64,200,357)=(357,64,1,357)
+        attention_vec = self.softmax(pre_softmax)
+        cell_state = attention_vec.matmul(v) #(357,64,1,200)
+
+        preGateInput = torch.cat((context_words.permute(0,2,1,3), cell_state), dim=3) #357,64,1,400
+
+        gate = torch.sigmoid(self.gatedAttention(preGateInput))
+        gate_input_matrix = (preGateInput * gate) #357,64, 1, 400
+
         hidden_states = []
-        self.prevHiddenState = Variable(torch.zeros(2, v.shape[0], self.hidden_size).cuda())        # hidden_states.append(self.prevHiddenState)
-
-        v_perm = v.permute(1,0,2)
-        for context_word in torch.split(v_perm, 1):
-            currentword_mult = self.linear1(context_word)
-            context_mult = self.linear2(v_perm)
-            f = torch.tanh(currentword_mult + context_mult)
-            f = f.permute(1,2,0) # 64, 200, 357
-            pre_softmax = (context_word.permute(1,0,2)).matmul(f) #64, 1, 357
-            attention_vec = self.softmax(pre_softmax, dim=2)
-            cell_state = attention_vec.matmul(v)
-
-            preGateInput = torch.cat((context_word.permute(1,0,2), cell_state), dim=2)
-
-            gate = torch.sigmoid(self.gatedAttention(preGateInput))
-            gate_input = (preGateInput * gate) #64, 1, 400
-
-            output, self.prevHiddenState = self.BiRNN(gate_input, self.prevHiddenState)
+        for gate_input in torch.split(gate_input_matrix, 1):
+            output, self.prevHiddenState = self.BiRNN(gate_input.squeeze(0), self.prevHiddenState)
             h = self.prevHiddenState
             h = torch.cat((h[0, :, :], h[1, :, :]), dim=1)
             hidden_states.append(h)
@@ -357,8 +360,8 @@ class GatedAttention(nn.Module):
         hidden_states = []
         self.prevHiddenState = Variable(torch.zeros((1, c.shape[0], self.enc_size), device=self.device))
 
-        c_perm = c.permute(1,0,2)
-        q_perm = q.permute(1,0,2)
+        c_perm = c.permute(1,0,2) # 357, 64, 200
+        q_perm = q.permute(1,0,2) # 27, 64, 200
         for context_word in torch.split(c_perm, 1):
             hidden_mult = self.vq(self.prevHiddenState)
             context_mult = self.uc(context_word)
@@ -404,7 +407,7 @@ class RNETOutput(nn.Module):
         h_val = self.h_linear(h.permute(1,0,2))
         h_a = self.ha_linear(self.hidden_ans.permute(0,2,1))
         output = self.vt_linear(torch.tanh(h_val + h_a))
-        p_1 = masked_softmax(output, c_mask, dim=1)
+        p_1 = masked_softmax(output.squeeze(), c_mask, log_softmax=True) # dim1
 
         c_t = h.permute(1,2,0).matmul(output)
         trash, self.hidden_ans = self.rnn(c_t.permute(0,2,1), self.hidden_ans.permute(2,0,1))
@@ -412,7 +415,7 @@ class RNETOutput(nn.Module):
         h_val = self.h_linear(h.permute(1,0,2))
         h_a = self.ha_linear(self.hidden_ans.permute(1,0,2))
         output = self.vt_linear(torch.tanh(h_val + h_a))
-        p_2 = masked_softmax(output, c_mask, dim=1)
+        p_2 = masked_softmax(output.squeeze(), c_mask, log_softmax=True) # dim 1
 
         return p_1, p_2
 
